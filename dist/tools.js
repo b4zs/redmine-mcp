@@ -4,15 +4,15 @@ import { z } from 'zod';
 export function registerAllTools(server, client) {
     server.addTool({
         name: 'list_assigned_issues',
-        description: "List issues assigned to a user. Defaults to the API key owner (user_id='me'). Filter by project_id and/or status_id ('open', 'closed', '*' for all, or a numeric status id; default 'open'). Response includes total count and pagination info (offset, limit) to support manual pagination.",
+        description: "List issues assigned to a user. Default user is 'me' (API key owner). Use list_users to find numeric user_id. For status_id in list context, use: 'open' (default), 'closed', '*' (all), or numeric ID. Response includes total count and pagination info (offset, limit).",
         parameters: z.strictObject({
             user_id: z
                 .union([z.number(), z.string()])
                 .optional()
                 .default('me')
-                .describe("Default 'me'."),
-            project_id: z.number().int().optional(),
-            status_id: z.string().optional().describe('open|closed|*|<id>'),
+                .describe("Numeric ID from list_users or 'me' (default). Do NOT use username."),
+            project_id: z.number().int().optional().describe('Numeric ID from list_projects'),
+            status_id: z.string().optional().describe("'open' (default), 'closed', '*' (all), or numeric status ID"),
             limit: z.number().int().max(100).default(25),
             offset: z.number().int().default(0).describe('For pagination.'),
         }),
@@ -62,16 +62,16 @@ export function registerAllTools(server, client) {
     });
     server.addTool({
         name: 'create_issue',
-        description: 'Create a new issue in a project. Only project_id and subject are required.',
+        description: 'Create a new issue in a project. Required: project_id (numeric, use list_projects), subject. Optional fields must use numeric IDs: tracker_id (issue type), status_id (numeric, not "open"/"closed"), priority_id (urgency), assigned_to_id (use list_users for numeric ID, or "me"). Use get_issue with include parameter to explore field options.',
         parameters: z.strictObject({
-            project_id: z.number().int(),
-            subject: z.string(),
+            project_id: z.number().int().describe('Numeric ID from list_projects (required)'),
+            subject: z.string().describe('Issue title/summary (required)'),
             description: z.string().optional(),
-            tracker_id: z.number().int().optional(),
-            status_id: z.number().int().optional(),
-            priority_id: z.number().int().optional(),
-            assigned_to_id: z.number().int().optional(),
-            parent_issue_id: z.number().int().optional(),
+            tracker_id: z.number().int().optional().describe('Numeric ID (Bug=1, Feature=2, etc.; varies by instance)'),
+            status_id: z.number().int().optional().describe('Numeric ID only (not "open"/"closed" which only work in list filters)'),
+            priority_id: z.number().int().optional().describe('Numeric ID (Low, Normal, High, Urgent; varies by instance)'),
+            assigned_to_id: z.number().int().optional().describe('Numeric ID from list_users, or "me" for current user'),
+            parent_issue_id: z.number().int().optional().describe('Numeric issue ID to create this as a sub-task'),
         }),
         execute: async (args) => {
             const result = await client.createIssue({
@@ -89,13 +89,13 @@ export function registerAllTools(server, client) {
     });
     server.addTool({
         name: 'update_issue',
-        description: "Update an issue's status, assignee, and/or progress. Pass notes to leave a comment in the same call.",
+        description: "Update an issue's status, assignee, and/or progress. Pass notes to leave a comment in the same call. status_id must be numeric (use get_issue to see current status). assigned_to_id must be numeric from list_users or 'me'.",
         parameters: z.strictObject({
-            issue_id: z.number().int(),
-            status_id: z.number().int().optional(),
-            assigned_to_id: z.number().int().optional(),
-            notes: z.string().optional(),
-            done_ratio: z.number().int().min(0).max(100).optional(),
+            issue_id: z.number().int().describe('Numeric issue ID'),
+            status_id: z.number().int().optional().describe('Numeric status ID (not "open"/"closed")'),
+            assigned_to_id: z.union([z.number().int(), z.string()]).optional().describe('Numeric ID from list_users, or "me" for current user'),
+            notes: z.string().optional().describe('Comment to add to the issue'),
+            done_ratio: z.number().int().min(0).max(100).optional().describe('Completion percentage (0-100)'),
         }),
         execute: async (args) => {
             await client.updateIssue({
@@ -185,14 +185,14 @@ export function registerAllTools(server, client) {
     });
     server.addTool({
         name: 'create_time_entry',
-        description: 'Log time spent on an issue or project. Provide either issue_id or project_id, hours, and ideally activity_id (use list_time_entries on a similar issue to find valid activity ids). spent_on defaults to today if omitted.',
+        description: 'Log time spent on an issue or project. Required: either issue_id or project_id (not both), and hours. Optional: activity_id (numeric; use get_issue_time_entries to see valid values), spent_on (YYYY-MM-DD; defaults to today). activity_id and spent_on must use numeric IDs and valid dates.',
         parameters: z.strictObject({
-            issue_id: z.number().int().optional(),
-            project_id: z.number().int().optional(),
-            hours: z.number(),
-            activity_id: z.number().int().optional(),
-            spent_on: z.string().optional().describe('YYYY-MM-DD'),
-            comments: z.string().optional(),
+            issue_id: z.number().int().optional().describe('Numeric issue ID (provide this OR project_id, not both)'),
+            project_id: z.number().int().optional().describe('Numeric project ID (provide this OR issue_id, not both)'),
+            hours: z.number().describe('Time spent in hours (required)'),
+            activity_id: z.number().int().optional().describe('Numeric activity ID (look in similar time entries via get_issue_time_entries)'),
+            spent_on: z.string().optional().describe('Date in YYYY-MM-DD format (defaults to today if omitted)'),
+            comments: z.string().optional().describe('Note about what was done'),
         }),
         execute: async (args) => {
             const result = await client.createTimeEntry({
@@ -208,13 +208,15 @@ export function registerAllTools(server, client) {
     });
     server.addTool({
         name: 'list_projects',
-        description: 'List all projects in the Redmine instance. Response includes total count and pagination info (offset, limit) to support manual pagination.',
+        description: 'List all projects in the Redmine instance. Optionally search by project name, identifier, or description. Response includes total count and pagination info (offset, limit) to support manual pagination.',
         parameters: z.strictObject({
+            search: z.string().optional().describe('Filter projects by name, identifier, or description. Searches across all projects in memory.'),
             limit: z.number().int().max(100).default(25),
             offset: z.number().int().default(0).describe('For pagination.'),
         }),
         execute: async (args) => {
             const result = await client.listProjects({
+                search: args.search,
                 limit: args.limit,
                 offset: args.offset,
             });
