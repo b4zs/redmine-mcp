@@ -40,25 +40,20 @@ async function main() {
     }
     // Handle graceful shutdown
     process.on('SIGINT', () => {
-        console.log('Received SIGINT — shutting down.');
         process.exit(0);
     });
     process.on('SIGTERM', () => {
-        console.log('Received SIGTERM — shutting down.');
         process.exit(0);
     });
     process.on('SIGHUP', () => {
-        console.log('Received SIGHUP — shutting down.');
         process.exit(0);
     });
     process.stdin.on('end', () => {
-        console.log('stdin closed — MCP host disconnected. Shutting down.');
         process.exit(0);
     });
     process.stdin.on('error', () => {
         process.exit(0);
     });
-    console.log(`Redmine MCP server starting for ${redmineUrl}`);
     // Start the server
     try {
         await app.start();
