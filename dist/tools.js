@@ -3,47 +3,26 @@ import { z } from 'zod';
 /* --- Issues --- */
 export function registerAllTools(server, client) {
     server.addTool({
-        name: 'list_assigned_issues',
-        description: "List issues assigned to a user. Default user is 'me' (API key owner). Use list_users to find numeric user_id. For status_id in list context, use: 'open' (default), 'closed', '*' (all), or numeric ID. Response includes total count and pagination info (offset, limit).",
+        name: 'list_issues',
+        description: 'List issues from Redmine with optional filtering. Supports pagination, project_id filtering, and multiple project IDs/status IDs. With paginate=true, returns merged list of all available pages. With save_to_file=true, saves result to /tmp and returns file path.',
         parameters: z.strictObject({
-            user_id: z
-                .union([z.number(), z.string()])
-                .optional()
-                .default('me')
-                .describe("Numeric ID from list_users or 'me' (default). Do NOT use username."),
-            project_id: z.number().int().optional().describe('Numeric ID from list_projects'),
-            status_id: z.string().optional().describe("'open' (default), 'closed', '*' (all), or numeric status ID"),
+            status_id: z.array(z.union([z.number().int(), z.string()])).optional().describe("Array of numeric status IDs or status strings"),
+            project_id: z.number().int().optional().describe('Numeric project ID (or use project_ids array for filtering multiple)'),
+            project_ids: z.array(z.number().int()).optional().describe('Optional array of project IDs to filter results'),
             limit: z.number().int().max(100).default(25),
             offset: z.number().int().default(0).describe('For pagination.'),
+            paginate: z.boolean().optional().describe('If true, returns merged list of all available pages matching the original API format.'),
+            save_to_file: z.boolean().optional().describe('If true, saves the result to a file in /tmp dir and returns the file path handle instead.'),
         }),
         execute: async (args) => {
             const result = await client.listIssues({
-                assigned_to_id: args.user_id,
-                project_id: args.project_id,
                 status_id: args.status_id,
+                project_id: args.project_id,
+                project_ids: args.project_ids,
                 limit: args.limit,
                 offset: args.offset,
-            });
-            return JSON.stringify(result, null, 2);
-        },
-    });
-    server.addTool({
-        name: 'search_issues',
-        description: 'Full-text search across issue subject/description. Optionally narrow by project_id or status_id. Response includes total count and pagination info (offset, limit) to support manual pagination.',
-        parameters: z.strictObject({
-            query: z.string(),
-            project_id: z.number().int().optional(),
-            status_id: z.string().optional(),
-            limit: z.number().int().max(100).default(25),
-            offset: z.number().int().default(0).describe('For pagination.'),
-        }),
-        execute: async (args) => {
-            const result = await client.listIssues({
-                query: args.query,
-                project_id: args.project_id,
-                status_id: args.status_id,
-                limit: args.limit,
-                offset: args.offset,
+                paginate: args.paginate,
+                save_to_file: args.save_to_file,
             });
             return JSON.stringify(result, null, 2);
         },
@@ -145,41 +124,34 @@ export function registerAllTools(server, client) {
     });
     server.addTool({
         name: 'list_time_entries',
-        description: 'List logged time entries, filterable by user_id, project_id, issue_id. For a date range use period (Redmine shorthand: today, yesterday, current_week, last_week, current_month, last_month, current_year) OR explicit from_date/to_date (YYYY-MM-DD). Response includes total count and pagination info (offset, limit) to support manual pagination.',
+        description: 'List logged time entries, filterable by user_id, project_id, issue_id. For a date range use period (Redmine shorthand: today, yesterday, current_week, last_week, current_month, last_month, current_year) OR explicit from_date/to_date (YYYY-MM-DD). Response includes total count and pagination info (offset, limit) to support manual pagination. With paginate=true, returns merged list of all available pages. With save_to_file=true, saves result to /tmp and returns file path. Optionally filter by array of project_ids.',
         parameters: z.strictObject({
             user_id: z.union([z.number().int(), z.string()]).optional().describe("Numeric id or 'me'."),
-            project_id: z.number().int().optional(),
+            project_id: z.number().int().optional().describe('Numeric project ID (or use project_ids array for filtering multiple)'),
+            project_ids: z.array(z.number().int()).optional().describe('Optional array of project IDs to filter results'),
             issue_id: z.number().int().optional(),
             period: z.string().optional(),
             from_date: z.string().optional(),
             to_date: z.string().optional(),
             limit: z.number().int().max(100).default(25),
             offset: z.number().int().default(0).describe('For pagination.'),
+            paginate: z.boolean().optional().describe('If true, returns merged list of all available pages matching the original API format.'),
+            save_to_file: z.boolean().optional().describe('If true, saves the result to a file in /tmp dir and returns the file path handle instead.'),
         }),
         execute: async (args) => {
             const result = await client.listTimeEntries({
                 user_id: args.user_id,
                 project_id: args.project_id,
+                project_ids: args.project_ids,
                 issue_id: args.issue_id,
                 from_date: args.from_date,
                 to_date: args.to_date,
                 period: args.period,
                 limit: args.limit,
                 offset: args.offset,
+                paginate: args.paginate,
+                save_to_file: args.save_to_file,
             });
-            return JSON.stringify(result, null, 2);
-        },
-    });
-    server.addTool({
-        name: 'get_issue_time_entries',
-        description: 'List all time entries logged against a specific issue. Response includes total count and pagination info (offset, limit) to support manual pagination.',
-        parameters: z.strictObject({
-            issue_id: z.number().int(),
-            limit: z.number().int().max(100).default(25),
-            offset: z.number().int().default(0).describe('For pagination.'),
-        }),
-        execute: async (args) => {
-            const result = await client.getIssueTimeEntries(args.issue_id, args.limit, args.offset);
             return JSON.stringify(result, null, 2);
         },
     });
@@ -208,17 +180,21 @@ export function registerAllTools(server, client) {
     });
     server.addTool({
         name: 'list_projects',
-        description: 'List all projects in the Redmine instance. Optionally search by project name, identifier, or description. Response includes total count and pagination info (offset, limit) to support manual pagination.',
+        description: 'List all projects in the Redmine instance. Optionally search by project name, identifier, or description. Response includes total count and pagination info (offset, limit) to support manual pagination. With paginate=true, returns merged list of all available pages. With save_to_file=true, saves result to /tmp and returns file path.',
         parameters: z.strictObject({
             search: z.string().optional().describe('Filter projects by name, identifier, or description. Searches across all projects in memory.'),
             limit: z.number().int().max(100).default(25),
             offset: z.number().int().default(0).describe('For pagination.'),
+            paginate: z.boolean().optional().describe('If true, returns merged list of all available pages matching the original API format.'),
+            save_to_file: z.boolean().optional().describe('If true, saves the result to a file in /tmp dir and returns the file path handle instead.'),
         }),
         execute: async (args) => {
             const result = await client.listProjects({
                 search: args.search,
                 limit: args.limit,
                 offset: args.offset,
+                paginate: args.paginate,
+                save_to_file: args.save_to_file,
             });
             return JSON.stringify(result, null, 2);
         },
@@ -235,6 +211,17 @@ export function registerAllTools(server, client) {
                 limit: args.limit,
                 offset: args.offset,
             });
+            return JSON.stringify(result, null, 2);
+        },
+    });
+    server.addTool({
+        name: 'read_saved_file',
+        description: 'Read a JSON file previously saved by using save_to_file=true on list operations. Pass the file path returned from the earlier operation.',
+        parameters: z.strictObject({
+            filepath: z.string().describe('Path to the saved JSON file (e.g., /tmp/redmine_result_1234567890.json)'),
+        }),
+        execute: async (args) => {
+            const result = await client.readSavedFile(args.filepath);
             return JSON.stringify(result, null, 2);
         },
     });

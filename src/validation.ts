@@ -103,15 +103,44 @@ export class RedmineValidator {
     return this.isPositiveInteger(value, fieldName);
   }
 
-  private isStatusIdOrFilter(value: any, fieldName: string, inFilter: boolean = false): boolean {
-    // In filter context, allow string status values
-    if (inFilter) {
-      if (typeof value === 'string' && ['open', 'closed', '*'].includes(value)) {
-        return true;
+  private statusMapping: Record<string, number> = {
+    'new': 1,
+    'assigned': 2,
+    'in_progress': 7,
+    'test_needed': 8,
+    'feedback': 4,
+    'feedback_needed': 9,
+    'waiting_for_deploy': 10,
+    'resolved': 3,
+    'closed': 5,
+    'rejected': 6,
+  };
+
+  private normalizeStatusId(status: any): number | string {
+    if (typeof status === 'number') {
+      return status;
+    }
+    if (typeof status === 'string') {
+      const lower = status.toLowerCase();
+      if (lower in this.statusMapping) {
+        return this.statusMapping[lower];
+      }
+      // Try to parse as number
+      const num = parseInt(status, 10);
+      if (!isNaN(num) && num > 0) {
+        return num;
       }
     }
-    // In all contexts, numeric ID is valid
-    return this.isPositiveInteger(value, fieldName);
+    throw new Error(`Invalid status: ${status}. Use numeric ID or one of: ${Object.keys(this.statusMapping).join(', ')}`);
+  }
+
+  private isStatusIdOrFilter(value: any, fieldName: string, inFilter: boolean = false): boolean {
+    try {
+      this.normalizeStatusId(value);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /* --- Public Validation Methods --- */
@@ -140,11 +169,31 @@ export class RedmineValidator {
   public validateStatusId(statusId: any, inFilterContext: boolean = false): void {
     this.errors = [];
     if (!this.isStatusIdOrFilter(statusId, 'status_id', inFilterContext)) {
-      const hint = inFilterContext
-        ? `status_id can be "open", "closed", "*", or numeric`
-        : `status_id must be numeric (not "open"/"closed" which only work in filters)`;
-      throw this.getValidationError(hint);
+      throw this.getValidationError(
+        `status_id must be numeric or one of: ${Object.keys(this.statusMapping).join(', ')}`
+      );
     }
+  }
+
+  public validateStatusIds(statusIds: any, inFilterContext: boolean = false): void {
+    this.errors = [];
+    if (!Array.isArray(statusIds)) {
+      throw this.getValidationError('status_ids must be an array');
+    }
+    if (statusIds.length === 0) {
+      throw this.getValidationError('status_ids must contain at least one status ID');
+    }
+    for (const statusId of statusIds) {
+      if (!this.isStatusIdOrFilter(statusId, 'status_ids', inFilterContext)) {
+        throw this.getValidationError(
+          `status_ids contains invalid value "${statusId}"; must be numeric or one of: ${Object.keys(this.statusMapping).join(', ')}`
+        );
+      }
+    }
+  }
+
+  public normalizeStatus(status: any): number {
+    return this.normalizeStatusId(status) as number;
   }
 
   public validateTrackerId(trackerId: any): void {

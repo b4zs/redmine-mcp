@@ -27,6 +27,7 @@
     "time-entries"
   ],
   "dependencies": {
+    "dotenv": "^17.4.2",
     "fastmcp": "^4.0.1"
   },
   "devDependencies": {

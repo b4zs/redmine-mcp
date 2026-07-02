@@ -1,5 +1,7 @@
 /* Thin async client for the Redmine REST API (issues + time_entries plugin). */
+import { promises as fs } from 'fs';
 import { validator } from './validation.js';
+import { QueryBuilder } from './query-builder.js';
 export class RedmineAPIError extends Error {
     statusCode;
     body;
@@ -57,6 +59,7 @@ export class RedmineClient {
     }
     async request(method, path, options = {}) {
         const url = `${this.baseUrl}${path}`;
+        console.log(`🔗 Called URL: ${url}`);
         const headers = {
             'X-Redmine-API-Key': this.apiKey,
             'Content-Type': 'application/json',
@@ -66,6 +69,7 @@ export class RedmineClient {
             const response = await fetch(url, {
                 method,
                 headers,
+                credentials: 'include',
                 timeout: 15000,
                 ...options,
             });
@@ -111,20 +115,50 @@ export class RedmineClient {
         }
         return cleaned;
     }
-    buildQueryString(params) {
-        const cleaned = this.cleanParams(params);
-        const parts = [];
-        for (const [key, value] of Object.entries(cleaned)) {
-            if (Array.isArray(value)) {
-                for (const v of value) {
-                    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(v)}`);
-                }
-            }
-            else {
-                parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+    // Query building is now handled by QueryBuilder class
+    // This helper converts legacy params to QueryBuilder for backward compatibility
+    buildQueryStringFromParams(params) {
+        const qb = new QueryBuilder();
+        for (const [key, value] of Object.entries(params)) {
+            if (value !== null && value !== undefined) {
+                qb.addParam(key, value);
             }
         }
-        return parts.length > 0 ? `?${parts.join('&')}` : '';
+        return qb.buildQueryString();
+    }
+    async save_result_to_file(data) {
+        const timestamp = Date.now();
+        const filename = `/tmp/redmine_result_${timestamp}.json`;
+        await fs.writeFile(filename, JSON.stringify(data, null, 2), 'utf-8');
+        return filename;
+    }
+    async readSavedFile(filepath) {
+        try {
+            const content = await fs.readFile(filepath, 'utf-8');
+            return JSON.parse(content);
+        }
+        catch (error) {
+            throw new RedmineAPIError(`Failed to read file: ${error.message}`);
+        }
+    }
+    async paginate_all_results(endpoint, params, response_key) {
+        const all_results = [];
+        let current_offset = 0;
+        const page_size = 100;
+        while (true) {
+            const page_params = { ...params, limit: page_size, offset: current_offset };
+            const qs = this.buildQueryStringFromParams(page_params);
+            const data = await this.request('GET', `${endpoint}${qs}`);
+            const items = data[response_key] || [];
+            if (items.length === 0)
+                break;
+            all_results.push(...items);
+            if (data.total_count && current_offset + page_size >= data.total_count) {
+                break;
+            }
+            current_offset += page_size;
+        }
+        return all_results;
     }
     /* --- Issues --- */
     async getCurrentUser() {
@@ -140,7 +174,7 @@ export class RedmineClient {
             limit: Math.min(limit, 100),
             offset,
         };
-        const qs = this.buildQueryString(params);
+        const qs = this.buildQueryStringFromParams(params);
         const data = await this.request('GET', `/users.json${qs}`);
         return {
             users: data.users || [],
@@ -155,13 +189,16 @@ export class RedmineClient {
         if (include) {
             validator.validateInclude(include);
         }
-        const params = include ? { include } : {};
-        const qs = this.buildQueryString(params);
+        const qb = new QueryBuilder();
+        if (include) {
+            qb.addParam('include', include);
+        }
+        const qs = qb.buildQueryString();
         const data = await this.request('GET', `/issues/${issueId}.json${qs}`);
         return data.issue;
     }
     async listIssues(options = {}) {
-        const { assigned_to_id, project_id, status_id, query, limit = 25, offset = 0, sort = 'priority:desc,updated_on:desc', } = options;
+        const { assigned_to_id, project_id, project_ids, status_id, query, limit = 25, offset = 0, sort = 'priority:desc,updated_on:desc', paginate = false, save_to_file = false, } = options;
         // Validate parameters
         if (assigned_to_id !== undefined) {
             validator.validateUserId(assigned_to_id, 'assigned_to_id');
@@ -169,31 +206,79 @@ export class RedmineClient {
         if (project_id !== undefined) {
             validator.validateProjectId(project_id);
         }
+        if (project_ids !== undefined) {
+            project_ids.forEach(pid => validator.validateProjectId(pid));
+        }
         if (status_id !== undefined) {
-            validator.validateStatusId(status_id, true); // true = in filter context
+            // Validate each status_id value
+            const statusIds = Array.isArray(status_id) ? status_id : [status_id];
+            statusIds.forEach(sid => validator.validateStatusId(sid, true)); // true = in filter context
         }
         if (query !== undefined) {
             validator.validateQueryString(query);
         }
         validator.validateLimit(limit);
         validator.validateOffset(offset);
-        const params = {
-            assigned_to_id,
-            project_id,
-            status_id: status_id || '*',
-            q: query,
-            limit: Math.min(limit, 100),
-            offset,
-            sort,
-        };
-        const qs = this.buildQueryString(params);
+        // Normalize status_id to array format for consistent handling
+        const statusIdArray = status_id !== undefined
+            ? (Array.isArray(status_id) ? status_id : [status_id])
+            : undefined;
+        // Always build with QueryBuilder
+        const qb = new QueryBuilder();
+        if (project_ids && project_ids.length > 0) {
+            if (statusIdArray !== undefined) {
+                qb.addFilter('status_id', '=', statusIdArray);
+            }
+            else {
+                qb.addFilter('status_id', 'o');
+            }
+            qb.addFilter('project_id', '=', project_ids)
+                .addParam('set_filter', 1);
+        }
+        else {
+            if (assigned_to_id !== undefined)
+                qb.addParam('assigned_to_id', assigned_to_id);
+            if (project_id !== undefined)
+                qb.addParam('project_id', project_id);
+            if (query)
+                qb.addParam('q', query);
+            // For simple params, use comma-separated string if array
+            const statusIdParam = statusIdArray !== undefined
+                ? statusIdArray.join(',')
+                : '*';
+            qb.addParam('status_id', statusIdParam);
+        }
+        qb.addParam('limit', Math.min(limit, 100))
+            .addParam('offset', offset)
+            .addParam('sort', sort);
+        const qs = qb.buildQueryString();
+        if (paginate) {
+            const paginateParams = qb.buildParams();
+            const all_issues = await this.paginate_all_results('/issues.json', { ...paginateParams, limit: undefined, offset: undefined }, 'issues');
+            const result = {
+                issues: all_issues,
+                total: all_issues.length,
+                limit: all_issues.length,
+                offset: 0,
+            };
+            if (save_to_file) {
+                const filepath = await this.save_result_to_file(result);
+                return { issues: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+            }
+            return result;
+        }
         const data = await this.request('GET', `/issues.json${qs}`);
-        return {
+        const result = {
             issues: data.issues || [],
             total: data.total_count || 0,
             limit: data.limit || limit,
             offset: data.offset || offset,
         };
+        if (save_to_file) {
+            const filepath = await this.save_result_to_file(result);
+            return { issues: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+        }
+        return result;
     }
     async createIssue(options) {
         // Validate required fields
@@ -264,10 +349,38 @@ export class RedmineClient {
     }
     /* --- Projects --- */
     async listProjects(options = {}) {
-        const { limit = 25, offset = 0, search } = options;
+        const { limit = 25, offset = 0, search, paginate = false, save_to_file = false } = options;
         // Validate pagination parameters
         validator.validateLimit(limit);
         validator.validateOffset(offset);
+        // If paginate is true, fetch all projects
+        if (paginate) {
+            const all_projects = await this.paginate_all_results('/projects.json', {}, 'projects');
+            // Filter by search if provided
+            let filtered_projects = all_projects;
+            if (search) {
+                const search_lower = search.toLowerCase();
+                filtered_projects = all_projects.filter((p) => {
+                    const name = (p.name || '').toLowerCase();
+                    const identifier = (p.identifier || '').toLowerCase();
+                    const description = (p.description || '').toLowerCase();
+                    return (name.includes(search_lower) ||
+                        identifier.includes(search_lower) ||
+                        description.includes(search_lower));
+                });
+            }
+            const result = {
+                projects: filtered_projects,
+                total: filtered_projects.length,
+                limit: filtered_projects.length,
+                offset: 0,
+            };
+            if (save_to_file) {
+                const filepath = await this.save_result_to_file(result);
+                return { projects: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+            }
+            return result;
+        }
         // If searching, paginate through all projects and filter in memory
         if (search) {
             const searchLower = search.toLowerCase();
@@ -280,7 +393,7 @@ export class RedmineClient {
                     limit: pageSize,
                     offset: currentOffset,
                 };
-                const qs = this.buildQueryString(params);
+                const qs = this.buildQueryStringFromParams(params);
                 const data = await this.request('GET', `/projects.json${qs}`);
                 const projects = data.projects || [];
                 if (projects.length === 0) {
@@ -304,26 +417,36 @@ export class RedmineClient {
             }
             // Apply pagination to search results
             const paginatedProjects = allProjects.slice(offset, offset + limit);
-            return {
+            const result = {
                 projects: paginatedProjects,
                 total: allProjects.length,
                 limit: Math.min(limit, paginatedProjects.length),
                 offset,
             };
+            if (save_to_file) {
+                const filepath = await this.save_result_to_file(result);
+                return { projects: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+            }
+            return result;
         }
         // Regular pagination without search
         const params = {
             limit: Math.min(limit, 100),
             offset,
         };
-        const qs = this.buildQueryString(params);
+        const qs = this.buildQueryStringFromParams(params);
         const data = await this.request('GET', `/projects.json${qs}`);
-        return {
+        const result = {
             projects: data.projects || [],
             total: data.total_count || 0,
             limit: data.limit || limit,
             offset: data.offset || offset,
         };
+        if (save_to_file) {
+            const filepath = await this.save_result_to_file(result);
+            return { projects: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+        }
+        return result;
     }
     /* --- Wiki --- */
     async getProjectWiki(projectId, title = 'Wiki') {
@@ -341,13 +464,16 @@ export class RedmineClient {
     }
     /* --- Time entries (requires the time_entries plugin/REST module enabled) --- */
     async listTimeEntries(options = {}) {
-        const { user_id, project_id, issue_id, from_date, to_date, period, limit = 25, offset = 0, } = options;
+        const { user_id, project_id, project_ids, issue_id, from_date, to_date, period, limit = 25, offset = 0, paginate = false, save_to_file = false, } = options;
         // Validate parameters
         if (user_id !== undefined) {
             validator.validateUserId(user_id, 'user_id');
         }
         if (project_id !== undefined) {
             validator.validateProjectId(project_id);
+        }
+        if (project_ids !== undefined) {
+            project_ids.forEach(pid => validator.validateProjectId(pid));
         }
         if (issue_id !== undefined) {
             validator.validateIssueId(issue_id);
@@ -363,45 +489,53 @@ export class RedmineClient {
         }
         validator.validateLimit(limit);
         validator.validateOffset(offset);
-        const params = {
-            user_id,
-            project_id,
-            issue_id,
-            limit: Math.min(limit, 100),
-            offset,
-        };
+        // Always use QueryBuilder
+        const qb = new QueryBuilder();
+        if (user_id !== undefined)
+            qb.addParam('user_id', user_id);
+        if (project_id !== undefined)
+            qb.addParam('project_id', project_id);
+        if (issue_id !== undefined)
+            qb.addParam('issue_id', issue_id);
+        if (project_ids && project_ids.length > 0) {
+            qb.addFilter('project_id', '=', project_ids);
+        }
         if (period) {
-            params['f[]'] = 'spent_on';
-            params['op[spent_on]'] = period;
+            qb.addFilter('spent_on', period);
         }
         else if (from_date || to_date) {
-            params['f[]'] = 'spent_on';
-            params['op[spent_on]'] = '><';
-            params['v[spent_on][]'] = [from_date || '', to_date || ''];
+            qb.addFilter('spent_on', '><', [from_date || '', to_date || '']);
         }
-        const qs = this.buildQueryString(params);
+        qb.addParam('limit', Math.min(limit, 100))
+            .addParam('offset', offset);
+        const qs = qb.buildQueryString();
+        if (paginate) {
+            const paginateParams = qb.buildParams();
+            const all_entries = await this.paginate_all_results('/time_entries.json', { ...paginateParams, limit: undefined, offset: undefined }, 'time_entries');
+            const result = {
+                time_entries: all_entries,
+                total: all_entries.length,
+                limit: all_entries.length,
+                offset: 0,
+            };
+            if (save_to_file) {
+                const filepath = await this.save_result_to_file(result);
+                return { time_entries: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+            }
+            return result;
+        }
         const data = await this.request('GET', `/time_entries.json${qs}`);
-        return {
+        const result = {
             time_entries: data.time_entries || [],
             total: data.total_count || 0,
             limit: data.limit || limit,
             offset: data.offset || offset,
         };
-    }
-    async getIssueTimeEntries(issueId, limit = 25, offset = 0) {
-        // Validate parameters
-        validator.validateIssueId(issueId);
-        validator.validateLimit(limit);
-        validator.validateOffset(offset);
-        const params = { limit: Math.min(limit, 100), offset };
-        const qs = this.buildQueryString(params);
-        const data = await this.request('GET', `/issues/${issueId}/time_entries.json${qs}`);
-        return {
-            time_entries: data.time_entries || [],
-            total: data.total_count || 0,
-            limit: data.limit || limit,
-            offset: data.offset || offset,
-        };
+        if (save_to_file) {
+            const filepath = await this.save_result_to_file(result);
+            return { time_entries: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+        }
+        return result;
     }
     async createTimeEntry(options) {
         // Validate mutually exclusive constraint
