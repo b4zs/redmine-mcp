@@ -11,7 +11,7 @@ export function registerAllTools(server: FastMCP, client: RedmineClient) {
     name: 'list_issues',
     description: 'List Redmine issues with optional filters. paginate=true fetches all pages; save_to_file=true writes result to /tmp.',
     parameters: z.strictObject({
-      status_id: z.array(z.union([z.number().int(), z.string()])).optional().describe('Numeric IDs or "*" (all), "o" (open), "c" (closed). Default: open.'),
+      status_id: z.array(z.union([z.number().int(), z.string()])).optional().describe('Numeric Status IDs. Default: open.'),
       project_id: z.number().int().optional().describe('Single project ID.'),
       project_ids: z.array(z.number().int()).optional().describe('Multiple project IDs.'),
       assigned_to_id: z.union([z.number().int(), z.literal('me')]).optional().describe('Assignee user ID or "me".'),
