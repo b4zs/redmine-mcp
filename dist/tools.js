@@ -180,9 +180,10 @@ export function registerAllTools(server, client) {
     });
     server.addTool({
         name: 'list_projects',
-        description: 'List all projects in the Redmine instance. Optionally search by project name, identifier, or description. Response includes total count and pagination info (offset, limit) to support manual pagination. With paginate=true, returns merged list of all available pages. With save_to_file=true, saves result to /tmp and returns file path.',
+        description: 'List all projects in the Redmine instance. Optionally search by project name, identifier, or description. Filter by parent_id to list only direct subprojects of a given project. Response includes total count and pagination info (offset, limit) to support manual pagination. With paginate=true, returns merged list of all available pages. With save_to_file=true, saves result to /tmp and returns file path.',
         parameters: z.strictObject({
             search: z.string().optional().describe('Filter projects by name, identifier, or description. Searches across all projects in memory.'),
+            parent_id: z.number().int().optional().describe('Return only direct subprojects of this parent project ID.'),
             limit: z.number().int().max(100).default(25),
             offset: z.number().int().default(0).describe('For pagination.'),
             paginate: z.boolean().optional().describe('If true, returns merged list of all available pages matching the original API format.'),
@@ -191,6 +192,7 @@ export function registerAllTools(server, client) {
         execute: async (args) => {
             const result = await client.listProjects({
                 search: args.search,
+                parent_id: args.parent_id,
                 limit: args.limit,
                 offset: args.offset,
                 paginate: args.paginate,

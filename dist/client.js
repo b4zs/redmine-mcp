@@ -59,7 +59,6 @@ export class RedmineClient {
     }
     async request(method, path, options = {}) {
         const url = `${this.baseUrl}${path}`;
-        console.log(`🔗 Called URL: ${url}`);
         const headers = {
             'X-Redmine-API-Key': this.apiKey,
             'Content-Type': 'application/json',
@@ -263,7 +262,7 @@ export class RedmineClient {
             };
             if (save_to_file) {
                 const filepath = await this.save_result_to_file(result);
-                return { issues: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+                return { issues: null, total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
             }
             return result;
         }
@@ -276,7 +275,7 @@ export class RedmineClient {
         };
         if (save_to_file) {
             const filepath = await this.save_result_to_file(result);
-            return { issues: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+            return { issues: null, total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
         }
         return result;
     }
@@ -349,13 +348,14 @@ export class RedmineClient {
     }
     /* --- Projects --- */
     async listProjects(options = {}) {
-        const { limit = 25, offset = 0, search, paginate = false, save_to_file = false } = options;
+        const { limit = 25, offset = 0, search, parent_id, paginate = false, save_to_file = false } = options;
         // Validate pagination parameters
         validator.validateLimit(limit);
         validator.validateOffset(offset);
         // If paginate is true, fetch all projects
         if (paginate) {
-            const all_projects = await this.paginate_all_results('/projects.json', {}, 'projects');
+            const base_params = parent_id !== undefined ? { parent_id } : {};
+            const all_projects = await this.paginate_all_results('/projects.json', base_params, 'projects');
             // Filter by search if provided
             let filtered_projects = all_projects;
             if (search) {
@@ -377,7 +377,7 @@ export class RedmineClient {
             };
             if (save_to_file) {
                 const filepath = await this.save_result_to_file(result);
-                return { projects: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+                return { projects: null, total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
             }
             return result;
         }
@@ -392,6 +392,7 @@ export class RedmineClient {
                 const params = {
                     limit: pageSize,
                     offset: currentOffset,
+                    ...(parent_id !== undefined ? { parent_id } : {}),
                 };
                 const qs = this.buildQueryStringFromParams(params);
                 const data = await this.request('GET', `/projects.json${qs}`);
@@ -425,7 +426,7 @@ export class RedmineClient {
             };
             if (save_to_file) {
                 const filepath = await this.save_result_to_file(result);
-                return { projects: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+                return { projects: null, total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
             }
             return result;
         }
@@ -433,6 +434,7 @@ export class RedmineClient {
         const params = {
             limit: Math.min(limit, 100),
             offset,
+            ...(parent_id !== undefined ? { parent_id } : {}),
         };
         const qs = this.buildQueryStringFromParams(params);
         const data = await this.request('GET', `/projects.json${qs}`);
@@ -444,7 +446,7 @@ export class RedmineClient {
         };
         if (save_to_file) {
             const filepath = await this.save_result_to_file(result);
-            return { projects: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+            return { projects: null, total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
         }
         return result;
     }
@@ -520,7 +522,7 @@ export class RedmineClient {
             };
             if (save_to_file) {
                 const filepath = await this.save_result_to_file(result);
-                return { time_entries: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+                return { time_entries: null, total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
             }
             return result;
         }
@@ -533,7 +535,7 @@ export class RedmineClient {
         };
         if (save_to_file) {
             const filepath = await this.save_result_to_file(result);
-            return { time_entries: [], total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
+            return { time_entries: null, total: result.total, limit: result.limit, offset: result.offset, file_path: filepath };
         }
         return result;
     }
