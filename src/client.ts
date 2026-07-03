@@ -264,6 +264,7 @@ export class RedmineClient {
     project_id?: number;
     project_ids?: number[];
     status_id?: string | (number | string)[];
+    updated_on?: string;
     query?: string;
     limit?: number;
     offset?: number;
@@ -276,6 +277,7 @@ export class RedmineClient {
       project_id,
       project_ids,
       status_id,
+      updated_on,
       query,
       limit = 25,
       offset = 0,
@@ -331,7 +333,20 @@ export class RedmineClient {
         : '*';
       qb.addParam('status_id', statusIdParam);
     }
-    
+
+    if (updated_on !== undefined) {
+      const pipe_idx = updated_on.indexOf('|');
+      if (pipe_idx !== -1) {
+        const op = updated_on.slice(0, 2);
+        const parts = updated_on.slice(2).split('|');
+        qb.addFilter('updated_on', op as any, parts);
+      } else {
+        const op = updated_on.slice(0, 2);
+        const val = updated_on.slice(2);
+        qb.addFilter('updated_on', op as any, [val]);
+      }
+    }
+
     qb.addParam('limit', Math.min(limit, 100))
       .addParam('offset', offset)
       .addParam('sort', sort);

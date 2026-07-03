@@ -197,7 +197,7 @@ export class RedmineClient {
         return data.issue;
     }
     async listIssues(options = {}) {
-        const { assigned_to_id, project_id, project_ids, status_id, query, limit = 25, offset = 0, sort = 'priority:desc,updated_on:desc', paginate = false, save_to_file = false, } = options;
+        const { assigned_to_id, project_id, project_ids, status_id, updated_on, query, limit = 25, offset = 0, sort = 'priority:desc,updated_on:desc', paginate = false, save_to_file = false, } = options;
         // Validate parameters
         if (assigned_to_id !== undefined) {
             validator.validateUserId(assigned_to_id, 'assigned_to_id');
@@ -246,6 +246,19 @@ export class RedmineClient {
                 ? statusIdArray.join(',')
                 : '*';
             qb.addParam('status_id', statusIdParam);
+        }
+        if (updated_on !== undefined) {
+            const pipe_idx = updated_on.indexOf('|');
+            if (pipe_idx !== -1) {
+                const op = updated_on.slice(0, 2);
+                const parts = updated_on.slice(2).split('|');
+                qb.addFilter('updated_on', op, parts);
+            }
+            else {
+                const op = updated_on.slice(0, 2);
+                const val = updated_on.slice(2);
+                qb.addFilter('updated_on', op, [val]);
+            }
         }
         qb.addParam('limit', Math.min(limit, 100))
             .addParam('offset', offset)
