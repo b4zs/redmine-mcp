@@ -261,9 +261,8 @@ export class RedmineClient {
 
   async listIssues(options: {
     assigned_to_id?: number | string;
-    project_id?: number;
     project_ids?: number[];
-    status_id?: string | (number | string)[];
+    status_ids?: (number | string)[];
     updated_on?: string;
     query?: string;
     limit?: number;
@@ -274,9 +273,8 @@ export class RedmineClient {
   } = {}): Promise<IssuesResponse> {
     const {
       assigned_to_id,
-      project_id,
       project_ids,
-      status_id,
+      status_ids,
       updated_on,
       query,
       limit = 25,
@@ -290,16 +288,11 @@ export class RedmineClient {
     if (assigned_to_id !== undefined) {
       validator.validateUserId(assigned_to_id, 'assigned_to_id');
     }
-    if (project_id !== undefined) {
-      validator.validateProjectId(project_id);
-    }
     if (project_ids !== undefined) {
       project_ids.forEach(pid => validator.validateProjectId(pid));
     }
-    if (status_id !== undefined) {
-      // Validate each status_id value
-      const statusIds = Array.isArray(status_id) ? status_id : [status_id];
-      statusIds.forEach(sid => validator.validateStatusId(sid, true)); // true = in filter context
+    if (status_ids !== undefined) {
+      status_ids.forEach(sid => validator.validateStatusId(sid, true)); // true = in filter context
     }
     if (query !== undefined) {
       validator.validateQueryString(query);
@@ -307,10 +300,7 @@ export class RedmineClient {
     validator.validateLimit(limit);
     validator.validateOffset(offset);
 
-    // Normalize status_id to array format for consistent handling
-    const statusIdArray = status_id !== undefined 
-      ? (Array.isArray(status_id) ? status_id : [status_id])
-      : undefined;
+    const statusIdArray = status_ids !== undefined && status_ids.length > 0 ? status_ids : undefined;
 
     // Always build with QueryBuilder
     const qb = new QueryBuilder();
@@ -325,7 +315,6 @@ export class RedmineClient {
         .addParam('set_filter', 1);
     } else {
       if (assigned_to_id !== undefined) qb.addParam('assigned_to_id', assigned_to_id);
-      if (project_id !== undefined) qb.addParam('project_id', project_id);
       if (query) qb.addParam('q', query);
       // For simple params, use comma-separated string if array
       const statusIdParam = statusIdArray !== undefined 
@@ -642,7 +631,6 @@ export class RedmineClient {
 
   async listTimeEntries(options: {
     user_id?: number | string;
-    project_id?: number;
     project_ids?: number[];
     issue_id?: number;
     from_date?: string;
@@ -655,7 +643,6 @@ export class RedmineClient {
   } = {}): Promise<TimeEntriesResponse> {
     const {
       user_id,
-      project_id,
       project_ids,
       issue_id,
       from_date,
@@ -670,9 +657,6 @@ export class RedmineClient {
     // Validate parameters
     if (user_id !== undefined) {
       validator.validateUserId(user_id, 'user_id');
-    }
-    if (project_id !== undefined) {
-      validator.validateProjectId(project_id);
     }
     if (project_ids !== undefined) {
       project_ids.forEach(pid => validator.validateProjectId(pid));
@@ -696,7 +680,6 @@ export class RedmineClient {
     const qb = new QueryBuilder();
     
     if (user_id !== undefined) qb.addParam('user_id', user_id);
-    if (project_id !== undefined) qb.addParam('project_id', project_id);
     if (issue_id !== undefined) qb.addParam('issue_id', issue_id);
     
     if (project_ids && project_ids.length > 0) {
