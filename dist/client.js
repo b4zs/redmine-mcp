@@ -231,11 +231,32 @@ export class RedmineClient {
                 qb.addParam('assigned_to_id', assigned_to_id);
             if (query)
                 qb.addParam('q', query);
-            // For simple params, use comma-separated string if array
-            const statusIdParam = statusIdArray !== undefined
-                ? statusIdArray.join(',')
-                : '*';
-            qb.addParam('status_id', statusIdParam);
+            if (statusIdArray !== undefined) {
+                // Handle special filter keywords
+                if (statusIdArray.length === 1) {
+                    const s = String(statusIdArray[0]).toLowerCase();
+                    if (s === 'open') {
+                        qb.addFilter('status_id', 'o');
+                    }
+                    else if (s === 'closed') {
+                        qb.addFilter('status_id', 'c');
+                    }
+                    else if (s === '*') {
+                        qb.addFilter('status_id', '*');
+                    }
+                    else {
+                        qb.addFilter('status_id', '=', [validator.normalizeStatus(statusIdArray[0])]);
+                    }
+                }
+                else {
+                    // Multiple values: normalize names to numeric IDs and use filter-style params
+                    const numericIds = statusIdArray.map(sid => validator.normalizeStatus(sid));
+                    qb.addFilter('status_id', '=', numericIds);
+                }
+            }
+            else {
+                qb.addFilter('status_id', 'o'); // default: open issues
+            }
         }
         if (updated_on !== undefined) {
             const pipe_idx = updated_on.indexOf('|');

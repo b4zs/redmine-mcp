@@ -111,6 +111,9 @@ export class RedmineValidator {
         throw new Error(`Invalid status: ${status}. Use numeric ID or one of: ${Object.keys(this.statusMapping).join(', ')}`);
     }
     isStatusIdOrFilter(value, fieldName, inFilter = false) {
+        if (inFilter && typeof value === 'string' && ['open', 'closed', '*'].includes(value.toLowerCase())) {
+            return true;
+        }
         try {
             this.normalizeStatusId(value);
             return true;

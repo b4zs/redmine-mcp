@@ -135,6 +135,9 @@ export class RedmineValidator {
   }
 
   private isStatusIdOrFilter(value: any, fieldName: string, inFilter: boolean = false): boolean {
+    if (inFilter && typeof value === 'string' && ['open', 'closed', '*'].includes(value.toLowerCase())) {
+      return true;
+    }
     try {
       this.normalizeStatusId(value);
       return true;
