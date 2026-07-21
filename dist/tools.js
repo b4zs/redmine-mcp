@@ -6,9 +6,8 @@ export function registerAllTools(server, client) {
         name: 'list_issues',
         description: 'List Redmine issues with optional filters. paginate=true fetches all pages; save_to_file=true writes result to /tmp.',
         parameters: z.strictObject({
-            status_id: z.array(z.union([z.number().int(), z.string()])).optional().describe('Numeric Status IDs. Default: open.'),
-            project_id: z.number().int().optional().describe('Single project ID.'),
-            project_ids: z.array(z.number().int()).optional().describe('Multiple project IDs.'),
+            status_ids: z.array(z.union([z.number().int(), z.string()])).optional().describe('Status IDs (numeric) OR status names (e.g. "New", "Assigned"); also "open"/"closed"/"*". Multiple values are OR-ed. Default: open.'),
+            project_ids: z.array(z.number().int()).optional().describe('Array of project IDs.'),
             assigned_to_id: z.union([z.number().int(), z.literal('me')]).optional().describe('Assignee user ID or "me".'),
             query: z.string().optional().describe('Free-text search.'),
             updated_on: z.string().optional().describe('Redmine date filter: operator+YYYY-MM-DD with no space (>=, <=, =, or ><date|date for range).'),
@@ -20,8 +19,7 @@ export function registerAllTools(server, client) {
         }),
         execute: async (args) => {
             const result = await client.listIssues({
-                status_id: args.status_id,
-                project_id: args.project_id,
+                status_ids: args.status_ids,
                 project_ids: args.project_ids,
                 assigned_to_id: args.assigned_to_id,
                 query: args.query,
@@ -135,8 +133,7 @@ export function registerAllTools(server, client) {
         description: 'List logged time entries, filterable by user_id, project_id, issue_id. For a date range use period (Redmine shorthand: today, yesterday, current_week, last_week, current_month, last_month, current_year) OR explicit from_date/to_date (YYYY-MM-DD). Response includes total count and pagination info (offset, limit) to support manual pagination. With paginate=true, returns merged list of all available pages. With save_to_file=true, saves result to /tmp and returns file path. Optionally filter by array of project_ids.',
         parameters: z.strictObject({
             user_id: z.union([z.number().int(), z.string()]).optional().describe("Numeric id or 'me'."),
-            project_id: z.number().int().optional().describe('Numeric project ID (or use project_ids array for filtering multiple)'),
-            project_ids: z.array(z.number().int()).optional().describe('Optional array of project IDs to filter results'),
+            project_ids: z.array(z.number().int()).optional().describe('Array of project IDs to filter results'),
             issue_id: z.number().int().optional(),
             period: z.string().optional(),
             from_date: z.string().optional(),
@@ -149,7 +146,6 @@ export function registerAllTools(server, client) {
         execute: async (args) => {
             const result = await client.listTimeEntries({
                 user_id: args.user_id,
-                project_id: args.project_id,
                 project_ids: args.project_ids,
                 issue_id: args.issue_id,
                 from_date: args.from_date,
